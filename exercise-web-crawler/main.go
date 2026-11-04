@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 )
 
 type Fetcher interface {
@@ -9,6 +10,8 @@ type Fetcher interface {
 	// a slice of URLs found on that page.
 	Fetch(url string) (body string, urls []string, err error)
 }
+
+var temp = make(map[string]bool)
 
 // Crawl uses fetcher to recursively crawl
 // pages starting with url, to a maximum of depth.
@@ -19,6 +22,10 @@ func Crawl(url string, depth int, fetcher Fetcher) {
 	if depth <= 0 {
 		return
 	}
+	if temp[url] {
+		return
+	}
+	temp[url] = true
 	body, urls, err := fetcher.Fetch(url)
 	if err != nil {
 		fmt.Println(err)
@@ -26,13 +33,20 @@ func Crawl(url string, depth int, fetcher Fetcher) {
 	}
 	fmt.Printf("found: %s %q\n", url, body)
 	for _, u := range urls {
-		Crawl(u, depth-1, fetcher)
+		wg.Add(1)
+		go func() {
+			Crawl(u, depth-1, fetcher)
+			wg.Done()
+		}()
 	}
-	return
+	// return
 }
+
+var wg sync.WaitGroup
 
 func main() {
 	Crawl("https://golang.org/", 4, fetcher)
+	wg.Wait()
 }
 
 // fakeFetcher is Fetcher that returns canned results.
