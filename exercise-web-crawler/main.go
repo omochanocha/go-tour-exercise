@@ -11,42 +11,56 @@ type Fetcher interface {
 	Fetch(url string) (body string, urls []string, err error)
 }
 
-var temp = make(map[string]bool)
+type visitedSet struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
 
-// Crawl uses fetcher to recursively crawl
-// pages starting with url, to a maximum of depth.
-func Crawl(url string, depth int, fetcher Fetcher) {
-	// TODO: Fetch URLs in parallel.
-	// TODO: Don't fetch the same URL twice.
-	// This implementation doesn't do either:
-	if depth <= 0 {
+func (s *visitedSet) tryVisit(url string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.seen[url] {
+		return false
+	}
+	s.seen[url] = true
+	return true
+}
+
+type crawler struct {
+	fetcher Fetcher
+	visited visitedSet
+	wg      sync.WaitGroup
+}
+
+func (c *crawler) crawl(url string, depth int) {
+	defer c.wg.Done()
+	if depth <= 0 || !c.visited.tryVisit(url) {
 		return
 	}
-	if temp[url] {
-		return
-	}
-	temp[url] = true
-	body, urls, err := fetcher.Fetch(url)
+	body, urls, err := c.fetcher.Fetch(url)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	fmt.Printf("found: %s %q\n", url, body)
 	for _, u := range urls {
-		wg.Add(1)
-		go func() {
-			Crawl(u, depth-1, fetcher)
-			wg.Done()
-		}()
+		c.wg.Add(1)
+		go c.crawl(u, depth-1)
 	}
-	// return
 }
 
-var wg sync.WaitGroup
+// Crawl uses fetcher to recursively crawl
+// pages starting with url, to a maximum of depth.
+func Crawl(url string, depth int, fetcher Fetcher) {
+	c := &crawler{fetcher: fetcher, visited: visitedSet{seen: make(map[string]bool)}}
+	c.wg.Add(1)
+	go c.crawl(url, depth)
+	c.wg.Wait()
+}
 
 func main() {
 	Crawl("https://golang.org/", 4, fetcher)
-	wg.Wait()
 }
 
 // fakeFetcher is Fetcher that returns canned results.
